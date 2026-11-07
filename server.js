@@ -37,6 +37,10 @@ const gameServer = new Server({ server });
 
 // Daftarkan nama room "card_room"
 gameServer.define('card_room', CardRoom);
+// Tambahkan ini agar saat diakses tidak muncul Cannot GET /
+app.get("/", (req, res) => {
+    res.send("Server Colyseus Game Remi sedang berjalan dengan baik!");
+});
 
 gameServer.listen(port, () => {
     console.log(`=================================`);
