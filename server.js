@@ -3,7 +3,8 @@ const express = require('express');
 const { Server, Room } = require('colyseus');
 
 const app = express();
-const port = 2567;
+const port = process.env.PORT || 2567;
+
 
 // Logika Room Game Remi
 class CardRoom extends Room {
