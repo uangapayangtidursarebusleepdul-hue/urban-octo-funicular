@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remi Multiplayer Lobby - Phaser 3 & Colyseus</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Phaser 3 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+    <!-- Colyseus.js CDN -->
+    <script src="https://unpkg.com/colyseus.js@^0.15.0/dist/colyseus.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #ffffff; /* Latar Belakang Putih Polos */
+        }
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #ffffff;
+        }
+        canvas {
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            border: 2px solid #e2e8f0;
+        }
+    </style>
+</head>
+<body class="relative text-slate-800 select-none">
+
+    <!-- Top Bar Navigation & Lobby Controls -->
+    <div class="fixed top-0 left-0 w-full p-4 z-10 flex flex-wrap justify-between items-center bg-white/90 backdrop-blur-md border-b border-slate-200 shadow-sm">
+        
+        <!-- Left: Logo & Room ID -->
+        <div class="flex items-center gap-4">
+            <h1 class="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+                <span>🃏</span> Remi Mabar
+            </h1>
+
+            <!-- Display ID Room Utama -->
+            <div class="flex items-center bg-slate-100 border border-slate-300 rounded-lg px-3 py-1.5 gap-2">
+                <span class="text-xs font-semibold text-slate-500 uppercase">Room ID:</span>
+                <span id="current-room-id" class="text-sm font-mono font-bold text-indigo-600">ID: -----</span>
+                <button id="btn-copy-id" title="Salin ID" class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-0.5 rounded text-slate-700 transition">📋 Salin</button>
+            </div>
+            
+            <span id="connection-status" class="px-2.5 py-1 text-xs rounded-full bg-slate-200 text-slate-700 font-medium">Offline</span>
+        </div>
+
+        <!-- Right: Audio Control & Lobby Action -->
+        <div class="flex items-center gap-3">
+            <!-- Audio Loop Element -->
+            <audio id="bg-audio" loop preload="auto">
+                <source src="backsound.mp3" type="audio/mpeg">
+            </audio>
+
+            <button id="audio-toggle" class="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-all flex items-center gap-1.5 shadow-sm">
+                🔊 Audio: OFF
+            </button>
+            
+            <!-- Room Action Controls -->
+            <div class="flex items-center gap-2 border-l border-slate-300 pl-3">
+                <input type="text" id="target-room-id" placeholder="Masukkan ID Teman..." class="bg-slate-50 text-xs px-3 py-1.5 rounded-lg border border-slate-300 focus:outline-none focus:border-indigo-500 w-40 font-mono">
+                <button id="btn-join-room" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all shadow-sm">
+                    Gabung Mabar
+                </button>
+                <button id="btn-create-room" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all shadow-sm">
+                    Buat Room Baru
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Canvas Container Phaser -->
+    <div id="game-container"></div>
+
+    <script>
+        // --- AUDIO CONTROLLER ---
+        const audio = document.getElementById('bg-audio');
+        const audioBtn = document.getElementById('audio-toggle');
+        let isPlaying = false;
+
+        audioBtn.addEventListener('click', () => {
+            if (!isPlaying) {
+                audio.play().then(() => {
+                    isPlaying = true;
+                    audioBtn.textContent = '🔊 Audio: ON';
+                    audioBtn.classList.replace('bg-indigo-600', 'bg-emerald-600');
+                }).catch(() => {
+                    alert("Pastikan file 'backsound.mp3' berada di folder yang sama!");
+                });
+            } else {
+                audio.pause();
+                isPlaying = false;
+                audioBtn.textContent = '🔇 Audio: OFF';
+                audioBtn.classList.replace('bg-emerald-600', 'bg-indigo-600');
+            }
+        });
+
+        // --- COLYSEUS CLIENT MULTIPLAYER LOGIC ---
+        const SERVER_URL = "ws://localhost:2567";
+        let colyseusClient = new Colyseus.Client(SERVER_URL);
+        let room = null;
+
+        const roomDisplay = document.getElementById('current-room-id');
+        const statusBadge = document.getElementById('connection-status');
+        const targetRoomInput = document.getElementById('target-room-id');
+
+        function generateRandomId() {
+            return Math.random().toString(36).substring(2, 7).toUpperCase();
+        }
+
+        // Salin ID Ke Clipboard
+        document.getElementById('btn-copy-id').addEventListener('click', () => {
+            const rawId = roomDisplay.textContent.replace('ID: ', '');
+            if (rawId === '-----') {
+                alert("Buat room baru atau gabung room dulu untuk menyalin ID!");
+                return;
+            }
+            navigator.clipboard.writeText(rawId);
+            alert(`ID Room ${rawId} berhasil disalin! Bagikan ke temanmu.`);
+        });
+
+        // 1. BUAT ROOM BARU (HOST)
+        document.getElementById('btn-create-room').addEventListener('click', async () => {
+            const newRoomId = generateRandomId();
+            try {
+                statusBadge.textContent = 'Membuat Room...';
+                statusBadge.className = 'px-2.5 py-1 text-xs rounded-full bg-amber-500 text-white font-medium';
+
+                room = await colyseusClient.create("card_room", { customRoomId: newRoomId });
+
+                roomDisplay.textContent = `ID: ${room.id}`;
+                statusBadge.textContent = 'Terhubung (Host)';
+                statusBadge.className = 'px-2.5 py-1 text-xs rounded-full bg-emerald-600 text-white font-medium';
+
+                listenRoomEvents();
+            } catch (e) {
+                console.error(e);
+                alert("Gagal terhubung ke Server! Pastikan kamu sudah menjalankan server (node server.js).");
+                statusBadge.textContent = 'Server Offline';
+                statusBadge.className = 'px-2.5 py-1 text-xs rounded-full bg-red-600 text-white font-medium';
+            }
+        });
+
+        // 2. GABUNG ROOM TEMAN (GUEST)
+        document.getElementById('btn-join-room').addEventListener('click', async () => {
+            const inputId = targetRoomInput.value.trim().toUpperCase();
+            if (!inputId) {
+                alert("Masukkan Room ID temanmu terlebih dahulu!");
+                return;
+            }
+
+            try {
+                statusBadge.textContent = 'Mencari Room...';
+                statusBadge.className = 'px-2.5 py-1 text-xs rounded-full bg-amber-500 text-white font-medium';
+
+                room = await colyseusClient.joinById(inputId);
+
+                roomDisplay.textContent = `ID: ${room.id}`;
+                statusBadge.textContent = 'Terhubung (Guest)';
+                statusBadge.className = 'px-2.5 py-1 text-xs rounded-full bg-emerald-600 text-white font-medium';
+
+                listenRoomEvents();
+            } catch (e) {
+                console.error(e);
+                alert(`Room ID "${inputId}" tidak ditemukan atau server offline!`);
+                statusBadge.textContent = 'Gagal Join';
+                statusBadge.className = 'px-2.5 py-1 text-xs rounded-full bg-red-600 text-white font-medium';
+            }
+        });
+
+        function listenRoomEvents() {
+            if (!room) return;
+            room.onMessage("card_played", (data) => {
+                if (gameScene) gameScene.onOpponentPlayCard(data);
+            });
+        }
+
+        // --- PHASER 3 GAME ENGINE ---
+        let gameScene = null;
+
+        class MainCardScene extends Phaser.Scene {
+            constructor() {
+                super('MainCardScene');
+                gameScene = this;
+                this.handCards = [];
+                this.suits = ['♠', '♥', '♦', '♣'];
+                this.values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+            }
+
+            preload() {
+                this.generateCardTextures();
+            }
+
+            create() {
+                const width = this.cameras.main.width;
+                const height = this.cameras.main.height;
+
+                // Meja Karpet Hijau
+                const table = this.add.rectangle(width / 2, height / 2 + 10, width - 60, height - 100, 0x15803d, 1);
+                table.setStrokeStyle(4, 0x166534);
+
+                // Area Tengah Meja
+                this.add.rectangle(width / 2, height / 2 - 20, 180, 130, 0x000000, 0.15)
+                    .setStrokeStyle(2, 0xffffff, 0.4);
+                this.add.text(width / 2, height / 2 - 20, 'BUANG KARTU', { font: 'bold 12px Arial', fill: '#ffffff' }).setOrigin(0.5).setAlpha(0.6);
+
+                // Tumpukan Deck
+                const deckContainer = this.add.container(width / 2 - 260, height / 2 - 20);
+                const deckBack = this.add.rectangle(0, 0, 80, 115, 0x1e293b).setStrokeStyle(3, 0xf59e0b);
+                const deckLabel = this.add.text(0, 0, 'DECK\n(AMBIL)', { font: 'bold 11px Arial', fill: '#f59e0b', align: 'center' }).setOrigin(0.5);
+                deckContainer.add([deckBack, deckLabel]);
+
+                deckBack.setInteractive({ useHandCursor: true });
+                deckBack.on('pointerdown', () => this.drawCard());
+
+                // Bagi 5 Kartu Awal
+                for (let i = 0; i < 5; i++) {
+                    this.drawCard();
+                }
+
+                // Drag and Drop
+                this.input.on('dragstart', (pointer, gameObject) => {
+                    this.children.bringToTop(gameObject);
+                    gameObject.setScale(1.08);
+                });
+
+                this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
+                    gameObject.x = dragX;
+                    gameObject.y = dragY;
+                });
+
+                this.input.on('dragend', (pointer, gameObject) => {
+                    gameObject.setScale(1.0);
+                    if (Phaser.Math.Distance.Between(gameObject.x, gameObject.y, width / 2, height / 2 - 20) < 140) {
+                        this.playCardToTable(gameObject);
+                    } else {
+                        this.arrangeHand();
+                    }
+                });
+            }
+
+            generateCardTextures() {
+                this.suits.forEach(suit => {
+                    this.values.forEach(val => {
+                        const key = `card_${val}_${suit}`;
+                        if (this.textures.exists(key)) return;
+
+                        const canvas = this.textures.createCanvas(key, 85, 120);
+                        const ctx = canvas.context;
+
+                        ctx.fillStyle = '#ffffff';
+                        ctx.beginPath();
+                        ctx.roundRect(0, 0, 85, 120, 6);
+                        ctx.fill();
+                        ctx.lineWidth = 2;
+                        ctx.strokeStyle = '#cbd5e1';
+                        ctx.stroke();
+
+                        const isRed = suit === '♥' || suit === '♦';
+                        ctx.fillStyle = isRed ? '#e11d48' : '#0f172a';
+                        ctx.font = 'bold 15px Arial';
+
+                        ctx.fillText(val, 8, 20);
+                        ctx.font = '13px Arial';
+                        ctx.fillText(suit, 9, 35);
+
+                        ctx.font = '34px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(suit, 42.5, 65);
+
+                        canvas.refresh();
+                    });
+                });
+            }
+
+            drawCard() {
+                if (this.handCards.length >= 8) return;
+
+                const randomSuit = this.suits[Math.floor(Math.random() * this.suits.length)];
+                const randomValue = this.values[Math.floor(Math.random() * this.values.length)];
+                const textureKey = `card_${randomValue}_${randomSuit}`;
+
+                const width = this.cameras.main.width;
+                const height = this.cameras.main.height;
+
+                const card = this.add.image(width / 2 - 260, height / 2 - 20, textureKey);
+                card.setInteractive({ draggable: true });
+                card.cardData = { value: randomValue, suit: randomSuit };
+
+                this.handCards.push(card);
+                this.arrangeHand();
+            }
+
+            arrangeHand() {
+                const width = this.cameras.main.width;
+                const height = this.cameras.main.height;
+                const startX = width / 2 - ((this.handCards.length - 1) * 42);
+
+                this.handCards.forEach((card, index) => {
+                    this.tweens.add({
+                        targets: card,
+                        x: startX + (index * 84),
+                        y: height - 85,
+                        rotation: 0,
+                        duration: 200,
+                        ease: 'Power2'
+                    });
+                });
+            }
+
+            playCardToTable(card) {
+                this.handCards = this.handCards.filter(c => c !== card);
+                card.disableInteractive();
+
+                const width = this.cameras.main.width;
+                const height = this.cameras.main.height;
+
+                this.tweens.add({
+                    targets: card,
+                    x: width / 2 + (Math.random() * 30 - 15),
+                    y: height / 2 - 20 + (Math.random() * 30 - 15),
+                    rotation: (Math.random() - 0.5) * 0.4,
+                    duration: 200,
+                    ease: 'Quad.out'
+                });
+
+                if (room) {
+                    room.send("play_card", card.cardData);
+                }
+
+                this.arrangeHand();
+            }
+
+            onOpponentPlayCard(data) {
+                const textureKey = `card_${data.value}_${data.suit}`;
+                const width = this.cameras.main.width;
+                
+                const card = this.add.image(width / 2, 80, textureKey);
+                this.tweens.add({
+                    targets: card,
+                    x: width / 2 + (Math.random() * 30 - 15),
+                    y: this.cameras.main.height / 2 - 20,
+                    rotation: (Math.random() - 0.5) * 0.4,
+                    duration: 250
+                });
+            }
+        }
+
+        // Config Engine Phaser
+        const config = {
+            type: Phaser.AUTO,
+            width: Math.min(window.innerWidth * 0.96, 1100),
+            height: Math.min(window.innerHeight * 0.82, 620),
+            parent: 'game-container',
+            backgroundColor: '#ffffff',
+            scene: MainCardScene
+        };
+
+        const game = new Phaser.Game(config);
+
+        window.addEventListener('resize', () => {
+            game.scale.resize(
+                Math.min(window.innerWidth * 0.96, 1100),
+                Math.min(window.innerHeight * 0.82, 620)
+            );
+        });
+    </script>
+</body>
+</html>
