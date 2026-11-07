@@ -1,0 +1,14 @@
+{
+  "name": "remi-mabar-server",
+  "version": "1.0.0",
+  "description": "Server Colyseus Multiplayer Game Kartu Remi",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "colyseus": "^0.15.0",
+    "express": "^4.18.2",
+    "ws": "^8.13.0"
+  }
+}
