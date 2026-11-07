@@ -45,10 +45,10 @@
     <div id="game-container"></div>
 
     <script>
-        // --- AUDIO CONTROLLER ---
-        const audio = document.getElementById('bg-audio');
-        const audioBtn = document.getElementById('audio-toggle');
-        let isPlaying = false;
+        const client = new Colyseus.Client('wss://urban-octo-funicular-production.up.railway.app');
+
+    // --- AUDIO CONTROLLER ---
+    const audio = document.getElementByIdId(...)
 
         audioBtn.addEventListener('click', () => {
             if (!isPlaying) {
@@ -68,7 +68,7 @@
         });
 
         // --- COLYSEUS CLIENT & OFFLINE SIMULATOR ---
-        let room = null;
+        let room = null; 
         const roomDisplay = document.getElementById('current-room-id');
         const statusBadge = document.getElementById('connection-status');
         const targetRoomInput = document.getElementById('target-room-id');
